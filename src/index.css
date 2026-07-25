@@ -55,7 +55,7 @@ body {
 }
 
 .topbar {
-  height: 40px;
+  height: 56px;
   background-color: var(--bg-toolbar);
   border-bottom: 1px solid var(--border-color);
   display: flex;
@@ -69,6 +69,7 @@ body {
   gap: 16px;
   font-size: 13px;
   cursor: pointer;
+  margin-left: auto;
 }
 
 .topbar-menu span:hover {
@@ -78,7 +79,7 @@ body {
 .main-content {
   display: flex;
   flex: 1;
-  height: calc(100% - 40px);
+  height: calc(100% - 56px);
 }
 
 .toolbar {
@@ -314,4 +315,122 @@ select.layer-select:focus {
 .empty-state p {
   font-size: 14px;
   opacity: 0.7;
+}
+
+/* -------------------------------------- */
+/* RESPONSIVE DESIGN (Mobile & Tablet)    */
+/* -------------------------------------- */
+
+.mobile-only-btn {
+  display: none;
+}
+
+.floating-zoom-controls {
+  position: absolute;
+  bottom: 20px;
+  right: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 100;
+}
+
+.zoom-btn {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background-color: var(--bg-panel);
+  border: 1px solid var(--border-color);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  cursor: pointer;
+  color: var(--text-light);
+  transition: background-color 0.2s, transform 0.1s;
+}
+
+.zoom-btn:active {
+  transform: scale(0.95);
+  background-color: #f1f5f9;
+}
+
+@media (max-width: 768px) {
+  .mobile-only-btn {
+    display: flex;
+  }
+  
+  .hide-on-mobile {
+    display: none !important;
+  }
+
+  .main-content {
+    flex-direction: column;
+  }
+
+  .toolbar {
+    width: 100%;
+    height: 60px;
+    flex-direction: row;
+    padding: 0 10px;
+    justify-content: space-around;
+    border-right: none;
+    border-top: 1px solid var(--border-color);
+    order: 2; /* Move to bottom */
+  }
+
+  .canvas-area {
+    order: 1; /* Above toolbar */
+  }
+  
+  .floating-zoom-controls {
+    bottom: 80px; /* Above the bottom toolbar */
+  }
+
+  .right-panel {
+    position: fixed;
+    top: 40px; /* Below topbar */
+    right: 0;
+    height: calc(100vh - 100px); /* Adjust for topbar and bottom toolbar */
+    width: 280px;
+    z-index: 200;
+    box-shadow: -5px 0 25px rgba(0,0,0,0.15);
+    transform: translateX(100%);
+    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  .right-panel.show {
+    transform: translateX(0);
+  }
+
+  /* Overlay background for when panel is open */
+  .mobile-overlay {
+    position: fixed;
+    top: 40px;
+    left: 0;
+    right: 0;
+    bottom: 60px;
+    background-color: rgba(0,0,0,0.4);
+    z-index: 150;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.3s ease;
+  }
+
+  .mobile-overlay.show {
+    opacity: 1;
+    pointer-events: auto;
+  }
+  
+  /* Make topbar scrollable horizontally if it has many items */
+  .topbar {
+    overflow-x: auto;
+    white-space: nowrap;
+    padding-right: 20px;
+  }
+  
+  /* Hide the panel resizer on mobile */
+  .panel-resizer {
+    display: none !important;
+  }
 }

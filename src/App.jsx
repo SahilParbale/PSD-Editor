@@ -5,7 +5,7 @@ import { jsPDF } from 'jspdf';
 import localforage from 'localforage';
 import { Stage, Layer, Image as KonvaImage, Text as KonvaText, Rect, Group, Shape, Transformer, Line as KonvaLine } from 'react-konva';
 import Konva from 'konva';
-import { MousePointer2, Move, Type, Crop, Eraser, PenTool, Eye, EyeOff, Layers, ImageIcon, Zap, UploadCloud, Trash2, FolderOpen, Save, Download, FileText, X, Copy, Palette, Undo, Redo } from 'lucide-react';
+import { MousePointer2, Move, Type, Crop, Eraser, PenTool, Eye, EyeOff, Layers, ImageIcon, Zap, UploadCloud, Trash2, FolderOpen, Save, Download, FileText, X, Copy, Palette, Undo, Redo, ZoomIn, ZoomOut, Menu } from 'lucide-react';
 import { readPsd, writePsdUint8Array } from 'ag-psd';
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
@@ -130,6 +130,7 @@ function App() {
   const [layers, setLayers] = useState([]);
   const [scale, setScale] = useState(1);
   const [stagePos, setStagePos] = useState({ x: 0, y: 0 });
+  const [showMobilePanel, setShowMobilePanel] = useState(false);
   
   const [showBulkModal, setShowBulkModal] = useState(false);
   const [bulkText, setBulkText] = useState('');
@@ -589,12 +590,79 @@ function App() {
 
   const textLayers = layers.filter(l => l.text !== undefined || l.canvas !== undefined);
 
+  const handleStagePointerDown = (e) => {
+    if (activeTool === 'brush' || activeTool === 'eraser') {
+      if (!selectedNodeId) {
+        alert("Please select a layer from the right panel to draw on.");
+        return;
+      }
+      isDrawing.current = true;
+      const stage = e.target.getStage();
+      const pos = stage.getPointerPosition();
+      if (!pos) return;
+      const targetLayer = layers.find(l => l.uniqueId === selectedNodeId);
+      if (!targetLayer) return;
+
+      const transform = stage.getAbsoluteTransform().copy().invert();
+      const localPos = transform.point(pos);
+      const layerX = localPos.x - (targetLayer.left || 0);
+      const layerY = localPos.y - (targetLayer.top || 0);
+
+      const newLine = {
+        tool: activeTool,
+        color: brushColor,
+        size: brushSize,
+        points: [layerX, layerY]
+      };
+      
+      setLayers(prev => prev.map(l => {
+        if (l.uniqueId === selectedNodeId) {
+          return { ...l, lines: [...(l.lines || []), newLine] };
+        }
+        return l;
+      }));
+    } else {
+      const clickedOnEmpty = e.target === e.target.getStage();
+      if (clickedOnEmpty) {
+        setSelectedNodeId(null);
+      }
+    }
+  };
+
+  const handleStagePointerMove = (e) => {
+    if (!isDrawing.current || (activeTool !== 'brush' && activeTool !== 'eraser') || !selectedNodeId) return;
+    const stage = e.target.getStage();
+    const pos = stage.getPointerPosition();
+    if (!pos) return;
+    const transform = stage.getAbsoluteTransform().copy().invert();
+    const localPos = transform.point(pos);
+    const targetLayer = layers.find(l => l.uniqueId === selectedNodeId);
+    if (!targetLayer) return;
+    const layerX = localPos.x - (targetLayer.left || 0);
+    const layerY = localPos.y - (targetLayer.top || 0);
+
+    setLayers(prev => prev.map(l => {
+      if (l.uniqueId === selectedNodeId) {
+        const lines = [...(l.lines || [])];
+        const lastLine = { ...lines[lines.length - 1] };
+        lastLine.points = lastLine.points.concat([layerX, layerY]);
+        lines[lines.length - 1] = lastLine;
+        return { ...l, lines };
+      }
+      return l;
+    }));
+  };
+
+  const handleStagePointerUp = () => {
+    isDrawing.current = false;
+  };
+
   return (
     <div className="app-container">
       <div className="topbar">
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 'bold', color: 'var(--text-light)', marginRight: '20px' }}>
-          <Layers size={20} color="var(--accent)" />
-          <span>PSD Editor + Bulk Automation</span>
+          <img src="/logo.png" alt="Psdify Logo" style={{ width: '44px', height: '44px', borderRadius: '6px', objectFit: 'cover' }} />
+          <span style={{ fontSize: '24px', letterSpacing: '0.5px' }}>Psdify</span>
         </div>
         <div className="topbar-menu" style={{ alignItems: 'center' }}>
           
@@ -631,6 +699,7 @@ function App() {
           <div style={{ height: '1px', width: '24px', background: 'var(--border-color)', margin: '8px 0' }}></div>
           <div className={`tool-button ${historyIndexRef.current <= 0 ? 'disabled' : ''}`} onClick={handleUndo} style={{ opacity: historyIndexRef.current <= 0 ? 0.3 : 1 }}><Undo size={18} /></div>
           <div className={`tool-button ${historyIndexRef.current >= historyRef.current.length - 1 ? 'disabled' : ''}`} onClick={handleRedo} style={{ opacity: historyIndexRef.current >= historyRef.current.length - 1 ? 0.3 : 1 }}><Redo size={18} /></div>
+          <div className="mobile-only-btn tool-button" onClick={() => setShowMobilePanel(!showMobilePanel)}><Layers size={18} /></div>
         </div>
 
         {selectedNodeId && (
@@ -862,6 +931,10 @@ function App() {
             </div>
           ) : (
             <div style={{ position: 'relative', width: '100%', height: '100%' }}>
+              <div className="floating-zoom-controls">
+                <button className="zoom-btn" onClick={() => setScale(s => Math.min(s * 1.2, 5))}><ZoomIn size={20} /></button>
+                <button className="zoom-btn" onClick={() => setScale(s => Math.max(s / 1.2, 0.1))}><ZoomOut size={20} /></button>
+              </div>
               <button 
                 onClick={handleClearCache}
                 style={{ position: 'absolute', top: 10, right: 10, zIndex: 100, display: 'flex', alignItems: 'center', gap: '5px', padding: '8px 12px', background: 'var(--bg-panel)', border: '1px solid var(--border-color)', color: 'var(--text-light)', borderRadius: '4px', cursor: 'pointer', boxShadow: 'var(--shadow)' }}
@@ -882,71 +955,13 @@ function App() {
                   scaleX={scale} 
                   scaleY={scale} 
                   ref={stageRef}
-                  onMouseDown={(e) => {
-                    if (activeTool === 'brush' || activeTool === 'eraser') {
-                      if (!selectedNodeId) {
-                        alert("Please select a layer from the right panel to draw on.");
-                        return;
-                      }
-                      isDrawing.current = true;
-                      const stage = e.target.getStage();
-                      const pos = stage.getPointerPosition();
-                      const targetLayer = layers.find(l => l.uniqueId === selectedNodeId);
-                      if (!targetLayer) return;
-
-                      const transform = stage.getAbsoluteTransform().copy().invert();
-                      const localPos = transform.point(pos);
-                      const layerX = localPos.x - (targetLayer.left || 0);
-                      const layerY = localPos.y - (targetLayer.top || 0);
-
-                      const newLine = {
-                        tool: activeTool,
-                        color: brushColor,
-                        size: brushSize,
-                        points: [layerX, layerY]
-                      };
-                      
-                      setLayers(prev => prev.map(l => {
-                        if (l.uniqueId === selectedNodeId) {
-                          return { ...l, lines: [...(l.lines || []), newLine] };
-                        }
-                        return l;
-                      }));
-                    } else {
-                      const clickedOnEmpty = e.target === e.target.getStage();
-                      if (clickedOnEmpty) {
-                        setSelectedNodeId(null);
-                      }
-                    }
-                  }}
-                  onMouseMove={(e) => {
-                    if (!isDrawing.current || (activeTool !== 'brush' && activeTool !== 'eraser') || !selectedNodeId) return;
-                    const stage = e.target.getStage();
-                    const pos = stage.getPointerPosition();
-                    const transform = stage.getAbsoluteTransform().copy().invert();
-                    const localPos = transform.point(pos);
-                    const targetLayer = layers.find(l => l.uniqueId === selectedNodeId);
-                    if (!targetLayer) return;
-                    const layerX = localPos.x - (targetLayer.left || 0);
-                    const layerY = localPos.y - (targetLayer.top || 0);
-
-                    setLayers(prev => prev.map(l => {
-                      if (l.uniqueId === selectedNodeId) {
-                        const lines = [...(l.lines || [])];
-                        const lastLine = { ...lines[lines.length - 1] };
-                        lastLine.points = lastLine.points.concat([layerX, layerY]);
-                        lines[lines.length - 1] = lastLine;
-                        return { ...l, lines };
-                      }
-                      return l;
-                    }));
-                  }}
-                  onMouseUp={() => {
-                    isDrawing.current = false;
-                  }}
-                  onMouseLeave={() => {
-                    isDrawing.current = false;
-                  }}
+                  onMouseDown={handleStagePointerDown}
+                  onTouchStart={handleStagePointerDown}
+                  onMouseMove={handleStagePointerMove}
+                  onTouchMove={handleStagePointerMove}
+                  onMouseUp={handleStagePointerUp}
+                  onTouchEnd={handleStagePointerUp}
+                  onMouseLeave={handleStagePointerUp}
                 >
                   <Layer>
                     {[...layers].reverse().map((layer) => {
@@ -1154,13 +1169,17 @@ function App() {
       </div>
 
         <div 
+          className="panel-resizer"
           onMouseDown={() => setIsResizingRight(true)} 
           style={{ width: '12px', cursor: 'col-resize', backgroundColor: isResizingRight ? 'var(--accent)' : 'transparent', zIndex: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', borderLeft: '1px solid var(--border-color)', transition: 'background-color 0.2s' }} 
         >
           <div style={{ width: '4px', height: '24px', backgroundColor: 'var(--border-color)', borderRadius: '2px' }} />
         </div>
 
-        <div className="right-panel" style={{ width: rightPanelWidth, backgroundColor: 'var(--bg-panel)', borderLeft: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', flexShrink: 0 }}>
+        {/* Mobile Overlay */}
+        <div className={`mobile-overlay ${showMobilePanel ? 'show' : ''}`} onClick={() => setShowMobilePanel(false)}></div>
+
+        <div className={`right-panel ${showMobilePanel ? 'show' : ''}`} style={{ width: rightPanelWidth, backgroundColor: 'var(--bg-panel)', borderLeft: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', flexShrink: 0 }}>
           <div className="panel-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <h3 style={{ margin: 0, fontSize: '15px', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '8px' }}>
               <Layers size={18} color="var(--accent)" />
