@@ -6,7 +6,7 @@ import localforage from 'localforage';
 import { Stage, Layer, Image as KonvaImage, Text as KonvaText, Rect, Group, Shape, Transformer, Line as KonvaLine } from 'react-konva';
 import Konva from 'konva';
 import { MousePointer2, Move, Type, Crop, Eraser, PenTool, Eye, EyeOff, Layers, ImageIcon, Zap, UploadCloud, Trash2, FolderOpen, Save, Download, FileText, X, Copy, Palette, Undo, Redo } from 'lucide-react';
-import { readPsd } from 'ag-psd';
+import { readPsd, writePsdUint8Array } from 'ag-psd';
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
@@ -390,11 +390,56 @@ function App() {
     if (!file) return;
 
     try {
-      const buffer = await file.arrayBuffer();
+      let buffer;
+
+      if (file.type === 'image/png' || file.type === 'image/jpeg' || file.type === 'image/webp') {
+        const img = new window.Image();
+        const objUrl = URL.createObjectURL(file);
+        
+        await new Promise((resolve, reject) => {
+          img.onload = resolve;
+          img.onerror = reject;
+          img.src = objUrl;
+        });
+        
+        URL.revokeObjectURL(objUrl);
+        
+        const canvas = document.createElement('canvas');
+        canvas.width = img.width;
+        canvas.height = img.height;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0);
+        
+        const psdObject = {
+          width: canvas.width,
+          height: canvas.height,
+          channels: 3,
+          bitsPerChannel: 8,
+          colorMode: 3, // RGB
+          children: [
+            {
+              name: file.name,
+              canvas: canvas,
+              opacity: 255,
+              blendMode: 'normal',
+              left: 0,
+              top: 0,
+              right: canvas.width,
+              bottom: canvas.height
+            }
+          ]
+        };
+        
+        buffer = writePsdUint8Array(psdObject).buffer;
+      } else {
+        buffer = await file.arrayBuffer();
+      }
+
       await localforage.setItem('saved_psd', buffer);
       await parsePsdBuffer(buffer);
     } catch (error) {
       console.error(error);
+      alert('Failed to process uploaded file.');
     }
   };
 
@@ -761,6 +806,38 @@ function App() {
                       />
                     </div>
                   </div>
+
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginTop: '10px' }}>
+                    <label style={{ fontSize: '11px', color: 'var(--text-main)' }}>Font Family</label>
+                    <select 
+                      value={layers.find(l => l.uniqueId === selectedNodeId).editableFontFamily || getLayerFontData(layers.find(l => l.uniqueId === selectedNodeId)).fontFamily}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setLayers(prev => prev.map(l => l.uniqueId === selectedNodeId ? {
+                          ...l,
+                          editableFontFamily: val,
+                          editableText: l.editableText ?? l.text.text
+                        } : l));
+                      }}
+                      style={{ width: '100%', background: 'var(--bg-toolbar)', color: 'var(--text-light)', border: '1px solid var(--border-color)', padding: '6px', borderRadius: '4px' }}
+                    >
+                      <option value="sans-serif">Sans Serif</option>
+                      <option value="serif">Serif</option>
+                      <option value="monospace">Monospace</option>
+                      <option value="Arial">Arial</option>
+                      <option value="Helvetica">Helvetica</option>
+                      <option value="Times New Roman">Times New Roman</option>
+                      <option value="Courier New">Courier</option>
+                      <option value="Verdana">Verdana</option>
+                      <option value="Georgia">Georgia</option>
+                      <option value="Palatino">Palatino</option>
+                      <option value="Garamond">Garamond</option>
+                      <option value="Comic Sans MS">Comic Sans</option>
+                      <option value="Trebuchet MS">Trebuchet MS</option>
+                      <option value="Arial Black">Arial Black</option>
+                      <option value="Impact">Impact</option>
+                    </select>
+                  </div>
                 </div>
               )}
             </div>
@@ -780,8 +857,8 @@ function App() {
               <div className="upload-icon-wrapper" style={{ display: 'inline-block', padding: '20px', backgroundColor: 'var(--bg-toolbar)', borderRadius: '50%', boxShadow: 'var(--shadow)', marginBottom: '16px' }}>
                 <UploadCloud size={64} color="var(--accent)" />
               </div>
-              <h3 style={{ color: 'var(--text-light)', marginBottom: '8px' }}>Upload a PSD File</h3>
-              <p>Drag and drop or click to browse your files</p>
+              <h3 style={{ color: 'var(--text-light)', marginBottom: '8px' }}>Upload a PSD or Image</h3>
+              <p>Supports .psd, .png, .jpg, .webp</p>
             </div>
           ) : (
             <div style={{ position: 'relative', width: '100%', height: '100%' }}>
@@ -890,7 +967,15 @@ function App() {
                           fill={previewText !== null && selectedLayerId === layer.uniqueId ? bulkColor : (layer.editableFill || getLayerFontData(layer).fill)}
                           fontFamily={previewText !== null && selectedLayerId === layer.uniqueId ? bulkFontFamily : (layer.editableFontFamily || getLayerFontData(layer).fontFamily)}
                           fontStyle="bold"
-                          draggable={activeTool === 'move'}
+                          draggable={activeTool === 'move' || activeTool === 'select'}
+                          onMouseEnter={(e) => {
+                            if (activeTool === 'move' || (activeTool === 'select' && selectedNodeId === layer.uniqueId)) {
+                              e.target.getStage().container().style.cursor = 'move';
+                            }
+                          }}
+                          onMouseLeave={(e) => {
+                            e.target.getStage().container().style.cursor = activeTool === 'move' ? 'move' : 'default';
+                          }}
                           onDragEnd={(e) => {
                             const updatedLayers = [...layers];
                             const targetLayer = updatedLayers.find(l => l.uniqueId === layer.uniqueId);
@@ -918,7 +1003,15 @@ function App() {
                           y={layer.top || 0}
                           opacity={layer.opacity ?? 1}
                           globalCompositeOperation={layer.blendMode ?? 'source-over'}
-                          draggable={activeTool === 'move'}
+                          draggable={activeTool === 'move' || activeTool === 'select'}
+                          onMouseEnter={(e) => {
+                            if (activeTool === 'move' || (activeTool === 'select' && selectedNodeId === layer.uniqueId)) {
+                              e.target.getStage().container().style.cursor = 'move';
+                            }
+                          }}
+                          onMouseLeave={(e) => {
+                            e.target.getStage().container().style.cursor = activeTool === 'move' ? 'move' : 'default';
+                          }}
                           onClick={() => activeTool === 'select' && setSelectedNodeId(layer.uniqueId)}
                           onTap={() => activeTool === 'select' && setSelectedNodeId(layer.uniqueId)}
                           onDblClick={() => {
@@ -974,11 +1067,50 @@ function App() {
                   {selectedNodeId && activeTool === 'select' && (
                     <Transformer 
                       ref={trRef}
+                      anchorSize={12}
+                      anchorCornerRadius={6}
+                      borderStroke="#007acc"
+                      anchorStroke="#007acc"
+                      anchorFill="#ffffff"
+                      borderDash={[4, 4]}
+                      rotationSnaps={[0, 45, 90, 135, 180, 225, 270, 315]}
                       boundBoxFunc={(oldBox, newBox) => {
                         if (newBox.width < 5 || newBox.height < 5) {
                           return oldBox;
                         }
                         return newBox;
+                      }}
+                      anchorStyleFunc={(anchor) => {
+                        if (anchor.hasName('rotater')) {
+                          // Visual rendering of the rotater
+                          anchor.sceneFunc((ctx, shape) => {
+                            const cx = shape.width() / 2;
+                            const cy = shape.height() / 2;
+                            const r = 7;
+                            
+                            // Draw black circular arrow
+                            ctx.beginPath();
+                            ctx.strokeStyle = '#000000';
+                            ctx.lineWidth = 2.5;
+                            ctx.arc(cx, cy, r, Math.PI / 4, 0, false);
+                            ctx.stroke();
+                            
+                            // Draw black arrow head
+                            ctx.beginPath();
+                            ctx.fillStyle = '#000000';
+                            ctx.moveTo(cx + r, cy + 4);
+                            ctx.lineTo(cx + r - 4, cy - 2);
+                            ctx.lineTo(cx + r + 4, cy - 2);
+                            ctx.fill();
+                          });
+                          
+                          // Invisible expanded hit region so the whole icon area is clickable
+                          anchor.hitFunc((ctx, shape) => {
+                            ctx.beginPath();
+                            ctx.rect(-10, -10, shape.width() + 20, shape.height() + 20);
+                            ctx.fillStrokeShape(shape);
+                          });
+                        }
                       }}
                     />
                   )}
@@ -1054,7 +1186,7 @@ function App() {
               </SortableContext>
             </DndContext>
           </div>
-          <input type="file" accept=".psd" ref={fileInputRef} style={{ display: 'none' }} onChange={handleFileUpload} />
+          <input type="file" accept=".psd, image/png, image/jpeg, image/jpg, image/webp" ref={fileInputRef} style={{ display: 'none' }} onChange={handleFileUpload} />
         </div>
       </div>
 
