@@ -660,31 +660,31 @@ function App() {
   return (
     <div className="app-container">
       <div className="topbar">
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 'bold', color: 'var(--text-light)', marginRight: '20px' }}>
-          <img src="/logo.png" alt="Psdify Logo" style={{ width: '44px', height: '44px', borderRadius: '6px', objectFit: 'cover' }} />
-          <span style={{ fontSize: '24px', letterSpacing: '0.5px' }}>Psdify</span>
+        <div className="topbar-brand">
+          <img src="/logo.png" alt="Psdify Logo" className="brand-logo" />
+          <span className="brand-name">Psdify</span>
         </div>
         <div className="topbar-menu" style={{ alignItems: 'center' }}>
           
           <button 
+            className="topbar-action-btn"
             onClick={handleExportPNG} 
-            style={{ display: 'flex', alignItems: 'center', gap: '6px', background: 'var(--bg-panel)', color: 'var(--accent)', border: '1px solid var(--accent)', padding: '6px 12px', borderRadius: '4px', cursor: 'pointer', fontWeight: '500', fontSize: '13px' }}
           >
-            <Download size={14} /> Export PNG
+            <Download size={14} /> <span className="hide-on-mobile">Export PNG</span>
           </button>
 
           <button 
+            className="topbar-action-btn"
             onClick={handleExportPDF} 
-            style={{ display: 'flex', alignItems: 'center', gap: '6px', background: 'var(--bg-panel)', color: 'var(--accent)', border: '1px solid var(--accent)', padding: '6px 12px', borderRadius: '4px', cursor: 'pointer', fontWeight: '500', fontSize: '13px' }}
           >
-            <FileText size={14} /> Export PDF
+            <FileText size={14} /> <span className="hide-on-mobile">Export PDF</span>
           </button>
           
           <button 
+            className="topbar-action-btn primary"
             onClick={() => setShowBulkModal(true)} 
-            style={{ display: 'flex', alignItems: 'center', gap: '6px', background: 'var(--accent)', color: '#fff', border: 'none', padding: '7px 14px', borderRadius: '4px', cursor: 'pointer', fontWeight: '500', fontSize: '13px', boxShadow: '0 2px 4px rgba(0,122,204,0.2)' }}
           >
-            <Zap size={14} /> Bulk Generate
+            <Zap size={14} /> <span className="hide-on-mobile">Bulk Generate</span>
           </button>
         </div>
       </div>
