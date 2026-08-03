@@ -5,7 +5,7 @@ import { jsPDF } from 'jspdf';
 import localforage from 'localforage';
 import { Stage, Layer, Image as KonvaImage, Text as KonvaText, Rect, Group, Shape, Transformer, Line as KonvaLine } from 'react-konva';
 import Konva from 'konva';
-import { MousePointer2, Move, Type, Crop, Eraser, PenTool, Eye, EyeOff, Layers, ImageIcon, Zap, UploadCloud, Trash2, FolderOpen, Save, Download, FileText, X, Copy, Palette, Undo, Redo, ZoomIn, ZoomOut, Menu } from 'lucide-react';
+import { MousePointer2, Move, Type, Crop, Eraser, PenTool, Eye, EyeOff, Layers, ImageIcon, Zap, UploadCloud, Trash2, FolderOpen, Save, Download, FileText, X, Copy, Palette, Undo, Redo, ZoomIn, ZoomOut, Menu, Plus } from 'lucide-react';
 import { readPsd, writePsdUint8Array } from 'ag-psd';
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
@@ -37,7 +37,15 @@ function SortableLayerItem({ layer, index, selectedNodeId, setSelectedNodeId, se
         {!layer.hidden ? <Eye size={16} /> : <EyeOff size={16} color="#666" />}
       </div>
       
-      <div style={{ width: '24px', height: '24px', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: 'var(--border-color)', borderRadius: '4px', overflow: 'hidden', flexShrink: 0 }}>
+      <div 
+        draggable="true"
+        onDragStart={(e) => {
+          e.stopPropagation();
+          e.dataTransfer.setData('text/plain', layer.uniqueId);
+          e.dataTransfer.effectAllowed = 'copy';
+        }}
+        style={{ width: '24px', height: '24px', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: 'var(--border-color)', borderRadius: '4px', overflow: 'hidden', flexShrink: 0, cursor: 'grab' }}
+      >
         {layer.text ? (
           <div style={{ color: layer.editableFill || layer.text.fill || 'var(--text-light)', fontSize: '14px', fontWeight: 'bold' }}>T</div>
         ) : layer.imageElement ? (
@@ -65,11 +73,20 @@ const getLayerFontData = (layer) => {
   let fontSize = 48;
   let fill = '#ffffff';
   let fontFamily = 'sans-serif';
+  let fontStyle = 'normal';
 
   if (layer && layer.text) {
     const style = layer.text.style || (layer.text.styleRuns && layer.text.styleRuns[0]?.style);
     if (style) {
-      if (style.fontSize) fontSize = style.fontSize;
+      if (style.fontSize) {
+        let scale = 1;
+        if (layer.text.transform && layer.text.transform.length >= 4) {
+          const yx = layer.text.transform[2];
+          const yy = layer.text.transform[3];
+          scale = Math.sqrt(yx*yx + yy*yy);
+        }
+        fontSize = Math.round(style.fontSize * scale);
+      }
       if (style.fillColor && 'r' in style.fillColor) {
         const r = Math.round(style.fillColor.r).toString(16).padStart(2, '0');
         const g = Math.round(style.fillColor.g).toString(16).padStart(2, '0');
@@ -77,22 +94,42 @@ const getLayerFontData = (layer) => {
         fill = `#${r}${g}${b}`;
       }
       if (style.font?.name) {
-        const name = style.font.name.toLowerCase();
-        if (name.includes('arial')) fontFamily = 'Arial';
-        else if (name.includes('times')) fontFamily = 'Times New Roman';
-        else if (name.includes('courier')) fontFamily = 'Courier New';
-        else if (name.includes('helvetica')) fontFamily = 'Helvetica';
-        else if (name.includes('verdana')) fontFamily = 'Verdana';
-        else if (name.includes('georgia')) fontFamily = 'Georgia';
-        else if (name.includes('garamond')) fontFamily = 'Garamond';
-        else if (name.includes('impact')) fontFamily = 'Impact';
-        else if (name.includes('comic')) fontFamily = 'Comic Sans MS';
-        else if (name.includes('trebuchet')) fontFamily = 'Trebuchet MS';
-        else if (name.includes('palatino')) fontFamily = 'Palatino';
+        const rawName = style.font.name;
+        
+        // Clean up font name for better web font matching (e.g. "Montserrat-Bold" -> "Montserrat")
+        let cleanFamily = rawName.split('-')[0];
+        // Insert space before capital letters if there are no spaces (e.g. "OpenSans" -> "Open Sans")
+        if (!cleanFamily.includes(' ')) {
+           cleanFamily = cleanFamily.replace(/([a-z])([A-Z])/g, '$1 $2');
+        }
+        // Remove trailing abbreviations like MT, PSMT, MS
+        cleanFamily = cleanFamily.replace(/\s?(MT|PSMT|MS)$/i, '').trim();
+        
+        fontFamily = cleanFamily || rawName;
+
+        const lower = rawName.toLowerCase();
+        const isBold = lower.includes('bold');
+        const isItalic = lower.includes('italic');
+        
+        if (isBold && isItalic) fontStyle = 'italic bold';
+        else if (isBold) fontStyle = 'bold';
+        else if (isItalic) fontStyle = 'italic';
+
+        // Attempt to dynamically load from Google Fonts for perfect matching
+        if (typeof window !== 'undefined' && fontFamily !== 'sans-serif') {
+          if (!window.__loadedFonts) window.__loadedFonts = new Set();
+          if (!window.__loadedFonts.has(fontFamily)) {
+            window.__loadedFonts.add(fontFamily);
+            const link = document.createElement('link');
+            link.rel = 'stylesheet';
+            link.href = `https://fonts.googleapis.com/css2?family=${fontFamily.replace(/\s+/g, '+')}:ital,wght@0,400;0,700;1,400;1,700&display=swap`;
+            document.head.appendChild(link);
+          }
+        }
       }
     }
   }
-  return { fontSize, fill, fontFamily };
+  return { fontSize, fill, fontFamily, fontStyle };
 };
 
 const FilteredImage = React.memo(({ layer, imgW, imgH }) => {
@@ -133,15 +170,12 @@ function App() {
   const [showMobilePanel, setShowMobilePanel] = useState(false);
   
   const [showBulkModal, setShowBulkModal] = useState(false);
-  const [bulkText, setBulkText] = useState('');
-  const [selectedLayerId, setSelectedLayerId] = useState('');
+  const [selectedLayerIds, setSelectedLayerIds] = useState([]);
+  const [bulkJobs, setBulkJobs] = useState([{ id: Date.now(), data: {} }]);
   const [isGenerating, setIsGenerating] = useState(false);
   const [generationProgress, setGenerationProgress] = useState(0);
-  
-  const [previewText, setPreviewText] = useState(null);
-  const [bulkFontSize, setBulkFontSize] = useState(48);
-  const [bulkColor, setBulkColor] = useState('#ffffff');
-  const [bulkFontFamily, setBulkFontFamily] = useState('sans-serif');
+  const [previewData, setPreviewData] = useState(null);
+  const [isParsing, setIsParsing] = useState(false);
 
   // Canvas interaction states
   const [selectedNodeId, setSelectedNodeId] = useState(null);
@@ -226,18 +260,6 @@ function App() {
   const [isResizingLeft, setIsResizingLeft] = useState(false);
   const [isResizingRight, setIsResizingRight] = useState(false);
 
-  // Sync bulk settings when a layer is selected in the bulk modal
-  useEffect(() => {
-    if (selectedLayerId) {
-      const layer = layers.find(l => l.uniqueId === selectedLayerId);
-      if (layer) {
-        const { fontSize, fill, fontFamily } = getLayerFontData(layer);
-        setBulkFontSize(layer.editableFontSize || fontSize);
-        setBulkColor(layer.editableFill || fill);
-        setBulkFontFamily(layer.editableFontFamily || fontFamily);
-      }
-    }
-  }, [selectedLayerId]);
 
   const fileInputRef = useRef(null);
   const containerRef = useRef(null);
@@ -383,14 +405,20 @@ function App() {
     } catch (error) {
       console.error('Error parsing PSD:', error);
       alert('Failed to parse PSD file. See console for details.');
+    } finally {
+      setIsParsing(false);
     }
   };
 
   const handleFileUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
+    setIsParsing(true);
 
     try {
+      // Yield to the browser event loop so it can render the loading UI
+      await new Promise(resolve => setTimeout(resolve, 50));
+      
       let buffer;
 
       if (file.type === 'image/png' || file.type === 'image/jpeg' || file.type === 'image/webp') {
@@ -441,6 +469,7 @@ function App() {
     } catch (error) {
       console.error(error);
       alert('Failed to process uploaded file.');
+      setIsParsing(false);
     }
   };
 
@@ -450,10 +479,34 @@ function App() {
     setLayers(newLayers);
   };
 
-  const duplicateLayer = (id) => {
+  const duplicateLayer = (id, dropX = null, dropY = null) => {
     const layerIndex = layers.findIndex(l => l.uniqueId === id);
     if (layerIndex === -1) return;
-    const newLayer = { ...layers[layerIndex], uniqueId: Math.random().toString(36).substr(2, 9), name: layers[layerIndex].name + ' copy' };
+    const baseLayer = layers[layerIndex];
+    
+    let newLeft = baseLayer.left || 0;
+    let newTop = baseLayer.top || 0;
+    
+    if (dropX !== null && dropY !== null) {
+      const w = baseLayer.imageElement ? baseLayer.imageElement.width : (baseLayer.right - baseLayer.left);
+      const h = baseLayer.imageElement ? baseLayer.imageElement.height : (baseLayer.bottom - baseLayer.top);
+      newLeft = dropX - (w / 2 || 0);
+      newTop = dropY - (h / 2 || 0);
+    } else {
+      newLeft += 20;
+      newTop += 20;
+    }
+
+    const newLayer = { 
+      ...baseLayer, 
+      uniqueId: Math.random().toString(36).substr(2, 9), 
+      name: baseLayer.name + ' copy',
+      left: newLeft,
+      top: newTop,
+      right: newLeft + (baseLayer.right - baseLayer.left),
+      bottom: newTop + (baseLayer.bottom - baseLayer.top)
+    };
+    
     const newLayers = [...layers];
     newLayers.splice(layerIndex, 0, newLayer);
     setLayers(newLayers);
@@ -507,6 +560,47 @@ function App() {
     }, 100);
   };
 
+  const handleAddImageLayer = () => {
+    if (!psdData) {
+      handleOpenClick();
+      return;
+    }
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+    input.onchange = (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const img = new window.Image();
+        img.onload = () => {
+          isHistoryUpdate.current = true;
+          const stageW = psdData ? psdData.width : 800;
+          const stageH = psdData ? psdData.height : 600;
+          const newLayer = {
+            uniqueId: Math.random().toString(36).substr(2, 9),
+            name: file.name,
+            hidden: false,
+            opacity: 1,
+            blendMode: 'source-over',
+            left: stageW / 2 - img.width / 2,
+            top: stageH / 2 - img.height / 2,
+            right: (stageW / 2) + img.width / 2,
+            bottom: (stageH / 2) + img.height / 2,
+            imageElement: img
+          };
+          setLayers(prev => [newLayer, ...prev]);
+          setSelectedNodeId(newLayer.uniqueId);
+          setHistoryVersion(v => v + 1);
+        };
+        img.src = event.target.result;
+      };
+      reader.readAsDataURL(file);
+    };
+    input.click();
+  };
+
   const handleReplaceImageClick = (layerId) => {
     const input = document.createElement('input');
     input.type = 'file';
@@ -535,17 +629,14 @@ function App() {
   };
 
   const closeBulkModal = () => {
-    setBulkText('');
-    setSelectedLayerId('');
-    setBulkFontSize(48);
-    setBulkColor('#ffffff');
-    setBulkFontFamily('sans-serif');
+    setBulkJobs([{ id: Date.now(), data: {} }]);
+    setSelectedLayerIds([]);
     setShowBulkModal(false);
   };
 
   const handleGenerateZip = async () => {
-    if (!selectedLayerId || !bulkText.trim()) {
-      alert("Please select a target layer and provide some text.");
+    if (selectedLayerIds.length === 0 || bulkJobs.length === 0) {
+      alert("Please select at least one target layer and create at least one job.");
       return;
     }
     setIsGenerating(true);
@@ -553,12 +644,11 @@ function App() {
     
     try {
       const zip = new JSZip();
-      const lines = bulkText.split('\n').filter(l => l.trim() !== '');
       const stage = stageRef.current;
       
-      for (let i = 0; i < lines.length; i++) {
-        const text = lines[i];
-        setPreviewText(text);
+      for (let i = 0; i < bulkJobs.length; i++) {
+        const job = bulkJobs[i];
+        setPreviewData(job.data);
         await new Promise(resolve => setTimeout(resolve, 150));
         const dataURL = stage.toDataURL({ pixelRatio: 2 }); // Use higher quality for PDF
         const width = psdData ? psdData.width : stage.width();
@@ -574,9 +664,9 @@ function App() {
         const pdfBlob = pdf.output('blob');
         zip.file(`banner_${i + 1}.pdf`, pdfBlob);
         
-        setGenerationProgress(Math.round(((i + 1) / lines.length) * 100));
+        setGenerationProgress(Math.round(((i + 1) / bulkJobs.length) * 100));
       }
-      setPreviewText(null);
+      setPreviewData(null);
       const content = await zip.generateAsync({ type: "blob" });
       saveAs(content, "generated_banners.zip");
       closeBulkModal();
@@ -665,7 +755,7 @@ function App() {
           <span className="brand-name">Psdify</span>
         </div>
         <div className="topbar-menu" style={{ alignItems: 'center' }}>
-          
+
           <button 
             className="topbar-action-btn"
             onClick={handleExportPNG} 
@@ -831,12 +921,20 @@ function App() {
                     value={layers.find(l => l.uniqueId === selectedNodeId).editableText ?? layers.find(l => l.uniqueId === selectedNodeId).text.text}
                     onChange={(e) => {
                       const val = e.target.value;
-                      setLayers(prev => prev.map(l => l.uniqueId === selectedNodeId ? { 
-                        ...l, 
-                        editableText: val,
-                        editableFontSize: l.editableFontSize || 48,
-                        editableFill: l.editableFill || '#ffffff'
-                      } : l));
+                      setLayers(prev => prev.map(l => {
+                        if (l.uniqueId === selectedNodeId) {
+                          const { fontSize, fill, fontFamily, fontStyle } = getLayerFontData(l);
+                          return {
+                            ...l, 
+                            editableText: val,
+                            editableFontSize: l.editableFontSize || fontSize,
+                            editableFill: l.editableFill || fill,
+                            editableFontFamily: l.editableFontFamily || fontFamily,
+                            editableFontStyle: l.editableFontStyle || fontStyle
+                          };
+                        }
+                        return l;
+                      }));
                     }}
                     style={{ width: '100%', background: 'var(--bg-toolbar)', color: 'var(--text-light)', border: '1px solid var(--border-color)', padding: '6px', borderRadius: '4px', resize: 'vertical' }}
                   />
@@ -890,6 +988,15 @@ function App() {
                       }}
                       style={{ width: '100%', background: 'var(--bg-toolbar)', color: 'var(--text-light)', border: '1px solid var(--border-color)', padding: '6px', borderRadius: '4px' }}
                     >
+                      {/* Dynamically add the current font if it's not in the default list */}
+                      {(() => {
+                        const currentFont = layers.find(l => l.uniqueId === selectedNodeId).editableFontFamily || getLayerFontData(layers.find(l => l.uniqueId === selectedNodeId)).fontFamily;
+                        const defaultFonts = ["sans-serif", "serif", "monospace", "Arial", "Helvetica", "Times New Roman", "Courier New", "Verdana", "Georgia", "Palatino", "Garamond", "Comic Sans MS", "Trebuchet MS", "Arial Black", "Impact"];
+                        if (!defaultFonts.includes(currentFont)) {
+                          return <option value={currentFont}>{currentFont} (PSD Font)</option>;
+                        }
+                        return null;
+                      })()}
                       <option value="sans-serif">Sans Serif</option>
                       <option value="serif">Serif</option>
                       <option value="monospace">Monospace</option>
@@ -941,14 +1048,31 @@ function App() {
               >
                 <Trash2 size={16} color="#ff4444" /> Clear Saved PSD
               </button>
-              <div className="canvas-container" style={{ 
-                width: psdData.width * scale, 
-                height: psdData.height * scale,
-                position: 'absolute',
-                left: stagePos.x,
-                top: stagePos.y,
-                boxShadow: '0 0 20px rgba(0,0,0,0.8)'
-              }}>
+              <div 
+                className="canvas-container" 
+                style={{ 
+                  width: psdData.width * scale, 
+                  height: psdData.height * scale,
+                  position: 'absolute',
+                  left: stagePos.x,
+                  top: stagePos.y,
+                  boxShadow: '0 0 20px rgba(0,0,0,0.8)'
+                }}
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  e.dataTransfer.dropEffect = 'copy';
+                }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  const layerId = e.dataTransfer.getData('text/plain');
+                  if (layerId) {
+                    const rect = e.currentTarget.getBoundingClientRect();
+                    const dropX = (e.clientX - rect.left) / scale;
+                    const dropY = (e.clientY - rect.top) / scale;
+                    duplicateLayer(layerId, dropX, dropY);
+                  }
+                }}
+              >
                 <Stage 
                   width={Math.max(1, psdData.width * scale)} 
                   height={Math.max(1, psdData.height * scale)} 
@@ -967,21 +1091,23 @@ function App() {
                     {[...layers].reverse().map((layer) => {
                     if (layer.hidden) return null;
                     
-                    // If this is the targeted text layer for bulk generation, render a KonvaText instead of the raster image
-                    if (layer.uniqueId === selectedLayerId && previewText !== null) {
+                    // If this is a targeted text layer for bulk generation, render a KonvaText instead of the raster image
+                    if (previewData !== null && previewData[layer.uniqueId] !== undefined) {
+                      const imgW = layer.imageElement ? layer.imageElement.width : (layer.right - layer.left || 1);
                       return (
                         <KonvaText
                           key={layer.uniqueId}
                           id={layer.uniqueId}
-                          text={previewText}
+                          text={previewData[layer.uniqueId]}
                           x={layer.left || 0}
                           y={layer.top || 0}
                           opacity={layer.opacity ?? 1}
                           globalCompositeOperation={layer.blendMode ?? 'source-over'}
-                          fontSize={previewText !== null && selectedLayerId === layer.uniqueId ? bulkFontSize : (layer.editableFontSize || getLayerFontData(layer).fontSize)}
-                          fill={previewText !== null && selectedLayerId === layer.uniqueId ? bulkColor : (layer.editableFill || getLayerFontData(layer).fill)}
-                          fontFamily={previewText !== null && selectedLayerId === layer.uniqueId ? bulkFontFamily : (layer.editableFontFamily || getLayerFontData(layer).fontFamily)}
-                          fontStyle="bold"
+                          fontSize={layer.editableFontSize || getLayerFontData(layer).fontSize}
+                          fill={layer.editableFill || getLayerFontData(layer).fill}
+                          fontFamily={layer.editableFontFamily || getLayerFontData(layer).fontFamily}
+                          fontStyle={layer.editableFontStyle || getLayerFontData(layer).fontStyle}
+                          width={imgW}
                           draggable={activeTool === 'move' || activeTool === 'select'}
                           onMouseEnter={(e) => {
                             if (activeTool === 'move' || (activeTool === 'select' && selectedNodeId === layer.uniqueId)) {
@@ -1034,9 +1160,12 @@ function App() {
                               const newLayers = [...layers];
                               const target = newLayers.find(l => l.uniqueId === layer.uniqueId);
                               if (target.editableText === undefined) {
+                                const { fontSize, fill, fontFamily, fontStyle } = getLayerFontData(target);
                                 target.editableText = target.text.text;
-                                target.editableFontSize = 48;
-                                target.editableFill = '#ffffff';
+                                target.editableFontSize = fontSize;
+                                target.editableFill = fill;
+                                target.editableFontFamily = fontFamily;
+                                target.editableFontStyle = fontStyle;
                                 setLayers(newLayers);
                               }
                             }
@@ -1057,6 +1186,7 @@ function App() {
                               fontSize={layer.editableFontSize || getLayerFontData(layer).fontSize}
                               fill={layer.editableFill || getLayerFontData(layer).fill}
                               fontFamily={layer.editableFontFamily || getLayerFontData(layer).fontFamily}
+                              fontStyle={layer.editableFontStyle || getLayerFontData(layer).fontStyle}
                               width={imgW}
                             />
                           ) : (
@@ -1185,6 +1315,13 @@ function App() {
               <Layers size={18} color="var(--accent)" />
               Layers
             </h3>
+            <button 
+              onClick={handleAddImageLayer}
+              title="Add new image layer"
+              className="add-layer-btn"
+            >
+              <Plus size={12} /> Add new layer
+            </button>
           </div>
           <div className="layer-list">
             <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
@@ -1209,76 +1346,129 @@ function App() {
         </div>
       </div>
 
+      {/* Parsing Loading Toast */}
+      {isParsing && (
+        <div style={{
+          position: 'fixed',
+          top: '24px',
+          left: '50%',
+          transform: 'translateX(-50%)',
+          zIndex: 9999,
+          display: 'flex',
+          alignItems: 'center',
+          gap: '12px',
+          background: 'var(--bg-panel)',
+          padding: '12px 24px',
+          borderRadius: '8px',
+          border: '1px solid var(--border-color)',
+          boxShadow: '0 4px 12px rgba(0,0,0,0.15)'
+        }}>
+          <div className="spinner" style={{ border: '2px solid rgba(255, 255, 255, 0.1)', borderTop: '2px solid var(--accent)', borderRadius: '50%', width: '20px', height: '20px', animation: 'spin 1s linear infinite' }}></div>
+          <span style={{ color: 'var(--text-main)', fontSize: '14px', fontWeight: '500' }}>Extracting PSD Layers...</span>
+          <style>{`
+            @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+          `}</style>
+        </div>
+      )}
+
       {/* Bulk Generation Modal */}
       {showBulkModal && (
         <div className="modal-overlay">
-          <div className="modal-content">
+          <div className="modal-content" style={{ maxHeight: '90vh' }}>
             <div className="modal-header">
               <span>Bulk Banner Generation</span>
               <X size={20} style={{ cursor: 'pointer' }} onClick={closeBulkModal} />
             </div>
             
-            <div className="modal-body">
-              <label style={{ fontSize: '14px', color: 'var(--text-light)', fontWeight: '500' }}>1. Select the Text Layer to replace:</label>
-              <select 
-                className="layer-select"
-                value={selectedLayerId}
-                onChange={(e) => setSelectedLayerId(e.target.value)}
-              >
-                <option value="">-- Choose a layer --</option>
+            <div className="modal-body" style={{ flex: 1, overflowY: 'auto', paddingRight: '8px' }}>
+              <label style={{ fontSize: '14px', color: 'var(--text-light)', fontWeight: '500', marginBottom: '8px', display: 'block' }}>1. Select Target Text Layers:</label>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', background: 'var(--bg-panel)', padding: '12px', borderRadius: '4px', border: '1px solid var(--border-color)', maxHeight: '150px', overflowY: 'auto', marginBottom: '16px' }}>
                 {textLayers.map(l => (
-                  <option key={l.uniqueId} value={l.uniqueId}>{l.name}</option>
+                  <label key={l.uniqueId} style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-main)', fontSize: '13px', cursor: 'pointer' }}>
+                    <input 
+                      type="checkbox" 
+                      checked={selectedLayerIds.includes(l.uniqueId)}
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          setSelectedLayerIds(prev => [...prev, l.uniqueId]);
+                        } else {
+                          setSelectedLayerIds(prev => prev.filter(id => id !== l.uniqueId));
+                        }
+                      }}
+                      style={{ cursor: 'pointer' }}
+                    />
+                    {l.name}
+                  </label>
                 ))}
-              </select>
+                {textLayers.length === 0 && <span style={{ color: 'var(--text-main)', fontSize: '12px' }}>No text layers found in this PSD.</span>}
+              </div>
 
-              <label style={{ fontSize: '14px', color: 'var(--text-light)', fontWeight: '500', marginTop: '10px' }}>
-                2. Paste your new texts (one per line):
-              </label>
-              <textarea 
-                className="bulk-input"
-                placeholder="Sale 50% Off!\nNew Arrivals\nSummer Collection"
-                value={bulkText}
-                onChange={(e) => setBulkText(e.target.value)}
-              />
+              {selectedLayerIds.length > 0 && (
+                <>
+                  <label style={{ fontSize: '14px', color: 'var(--text-light)', fontWeight: '500', marginBottom: '8px', display: 'block' }}>
+                    2. Configure Generation Jobs:
+                  </label>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '16px' }}>
+                    {bulkJobs.map((job, jobIndex) => (
+                      <div key={job.id} style={{ display: 'flex', alignItems: 'flex-start', gap: '12px', padding: '12px', background: 'var(--bg-toolbar)', borderRadius: '6px', border: '1px solid var(--border-color)', position: 'relative' }}>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', flex: 1 }}>
+                          <div style={{ fontSize: '14px', fontWeight: '600', color: 'var(--text-light)', paddingBottom: '4px', borderBottom: '1px solid var(--border-color)', marginBottom: '4px' }}>
+                            Banner {jobIndex + 1}
+                          </div>
+                          {selectedLayerIds.map(layerId => {
+                            const layer = textLayers.find(l => l.uniqueId === layerId);
+                            return (
+                              <div key={layerId} style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                                <span style={{ fontSize: '11px', color: 'var(--text-main)' }}>{layer?.name || 'Unknown'}</span>
+                                <input 
+                                  type="text" 
+                                  placeholder={`Text for ${layer?.name}`}
+                                  value={job.data[layerId] || ''}
+                                  onChange={(e) => {
+                                    const val = e.target.value;
+                                    setBulkJobs(prev => prev.map((j, idx) => {
+                                      if (idx === jobIndex) {
+                                        return { ...j, data: { ...j.data, [layerId]: val } };
+                                      }
+                                      return j;
+                                    }));
+                                  }}
+                                  style={{ padding: '6px', borderRadius: '4px', border: '1px solid var(--border-color)', background: 'var(--bg-panel)', color: 'var(--text-light)' }}
+                                />
+                              </div>
+                            );
+                          })}
+                        </div>
+                        <button 
+                          onClick={() => {
+                            setBulkJobs(prev => prev.filter((_, idx) => idx !== jobIndex));
+                          }}
+                          style={{ background: 'transparent', border: 'none', color: '#ff4444', cursor: 'pointer', padding: '4px' }}
+                          title="Remove Job"
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
 
-              {selectedLayerId && (
-                <div style={{ display: 'flex', gap: '16px', marginTop: '10px' }}>
-                  <div style={{ flex: 1 }}>
-                    <label style={{ fontSize: '12px', color: 'var(--text-light)', fontWeight: '500', display: 'block', marginBottom: '4px' }}>Font Size (px):</label>
-                    <input type="number" value={bulkFontSize} onChange={e => setBulkFontSize(Number(e.target.value))} style={{ width: '100%', padding: '8px', border: '1px solid var(--border-color)', borderRadius: '4px' }} />
-                  </div>
-                  <div style={{ flex: 1 }}>
-                    <label style={{ fontSize: '12px', color: 'var(--text-light)', fontWeight: '500', display: 'block', marginBottom: '4px' }}>Color:</label>
-                    <input type="color" value={bulkColor} onChange={e => setBulkColor(e.target.value)} style={{ width: '100%', padding: '2px', height: '36px', border: '1px solid var(--border-color)', borderRadius: '4px', cursor: 'pointer' }} />
-                  </div>
-                  <div style={{ flex: 1 }}>
-                    <label style={{ fontSize: '12px', color: 'var(--text-light)', fontWeight: '500', display: 'block', marginBottom: '4px' }}>Font:</label>
-                    <select value={bulkFontFamily} onChange={e => setBulkFontFamily(e.target.value)} className="layer-select" style={{ padding: '8px', height: '36px' }}>
-                      <option value="sans-serif">Sans Serif</option>
-                      <option value="serif">Serif</option>
-                      <option value="monospace">Monospace</option>
-                      <option value="Arial">Arial</option>
-                      <option value="Helvetica">Helvetica</option>
-                      <option value="Times New Roman">Times New Roman</option>
-                      <option value="Courier New">Courier</option>
-                      <option value="Verdana">Verdana</option>
-                      <option value="Georgia">Georgia</option>
-                      <option value="Palatino">Palatino</option>
-                      <option value="Garamond">Garamond</option>
-                      <option value="Comic Sans MS">Comic Sans</option>
-                      <option value="Trebuchet MS">Trebuchet MS</option>
-                      <option value="Arial Black">Arial Black</option>
-                      <option value="Impact">Impact</option>
-                    </select>
-                  </div>
-                </div>
+                  <button 
+                    onClick={() => setBulkJobs(prev => [...prev, { id: Date.now(), data: {} }])}
+                    style={{ display: 'flex', alignItems: 'center', gap: '6px', background: 'var(--bg-toolbar)', border: '1px dashed var(--accent)', color: 'var(--accent)', padding: '8px 12px', borderRadius: '4px', cursor: 'pointer', marginBottom: '16px', fontSize: '13px', fontWeight: '500' }}
+                  >
+                    + Add Another Job
+                  </button>
+                </>
               )}
 
+            </div>
+            
+            <div className="modal-footer" style={{ paddingTop: '16px', borderTop: '1px solid var(--border-color)' }}>
               <button 
                 className="btn-primary" 
-                style={{ marginTop: '10px' }} 
                 onClick={handleGenerateZip}
-                disabled={isGenerating}
+                disabled={isGenerating || selectedLayerIds.length === 0 || bulkJobs.length === 0}
+                style={{ width: '100%' }}
               >
                 {isGenerating ? `Generating... ${generationProgress}%` : 'Generate & Download Zip'}
               </button>

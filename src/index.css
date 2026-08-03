@@ -210,6 +210,27 @@ body {
   color: var(--text-light);
 }
 
+.add-layer-btn {
+  background: var(--bg-toolbar);
+  border: 1px solid var(--border-color);
+  color: var(--text-main);
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  transition: all 0.2s ease;
+}
+
+.add-layer-btn:hover {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+
 .layer-list {
   flex: 1;
   overflow-y: auto;
